@@ -58,9 +58,9 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
         'X-Title': 'LLM LSP',
       },
       body: JSON.stringify({
-        model: 'meta-llama/llama-3.3-70b-instruct',
+        model: 'moonshotai/kimi-k2',
         provider: {
-          sort: 'throughput',
+          sort: 'latency',
         },
         messages: [
           {

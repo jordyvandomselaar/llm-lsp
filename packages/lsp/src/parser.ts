@@ -100,29 +100,18 @@ export class TreeSitterParser {
     const beforeCursor = line.substring(0, position.character);
     const trimmedBefore = beforeCursor.trim();
     
-    // Skip if line is empty or only whitespace (unless it's inside a function body)
+    // Handle empty lines - only allow if there's context in the file
     if (trimmedBefore === '') {
-      // Check if we're inside a function body
-      const nodeAtPosition = this.getNodeAtPosition(tree.rootNode, position);
-      if (nodeAtPosition) {
-        // Walk up to find if we're inside a function
-        let current: Parser.SyntaxNode | null = nodeAtPosition;
-        while (current) {
-          if (this.isFunctionNode(current)) {
-            // We're inside a function, allow completion
-            return false;
-          }
-          // Also check if we're inside a statement_block that belongs to a function
-          if (current.type === 'statement_block' || current.type === 'block') {
-            // Check if parent is a function
-            if (current.parent && this.isFunctionNode(current.parent)) {
-              return false;
-            }
-          }
-          current = current.parent;
-        }
-      }
-      return true; // Skip empty lines outside function bodies
+      // Check if there's any context in the file
+      const hasContext = lines.some((line, idx) => {
+        // Skip the current line
+        if (idx === position.line) return false;
+        // Check if any other line has non-whitespace content
+        return line.trim().length > 0;
+      });
+      
+      // Only allow completion if there's context elsewhere in the file
+      return !hasContext;
     }
     
     // Skip if we're in the middle of typing a word (unless after #)
