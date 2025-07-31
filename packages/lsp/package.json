@@ -3,7 +3,7 @@
   "module": "src/index.ts",
   "private": true,
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node --format cjs",
+    "build": "bun build ./src/index.ts --outfile ./dist/index.cjs --target node --format cjs",
     "clean": "rm -rf dist",
     "dev": "bun --watch src/index.ts",
     "typecheck": "tsc --noEmit"
@@ -18,9 +18,9 @@
   },
   "dependencies": {
     "node-fetch": "2",
+    "tree-sitter": "^0.25.0",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12",
-    "web-tree-sitter": "^0.25.8"
+    "vscode-languageserver-textdocument": "^1.0.12"
   }
 }

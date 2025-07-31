@@ -13,7 +13,7 @@ export async function activate(context: vscode.ExtensionContext) {
     
     // Path to the server module
     const serverModule = context.asAbsolutePath(
-        path.join('..', 'lsp', 'dist', 'index.js')
+        path.join('..', 'lsp', 'dist', 'index.cjs')
     );
     
     // The debug options for the server

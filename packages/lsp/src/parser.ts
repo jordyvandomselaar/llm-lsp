@@ -1,8 +1,5 @@
-import * as Parser from 'web-tree-sitter';
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import * as path from 'path';
-import * as fs from 'fs';
-import { fileURLToPath } from 'url';
+import Parser from 'tree-sitter';
 
 // Language configurations
 const LANGUAGE_CONFIGS: Record<string, { wasmFile: string; queries?: string }> = {
@@ -18,17 +15,15 @@ const LANGUAGE_CONFIGS: Record<string, { wasmFile: string; queries?: string }> =
 
 export class TreeSitterParser {
   private parser: Parser | null = null;
-  private languages: Map<string, Parser.Language> = new Map();
+  private languages: Map<string, any> = new Map();
   private initialized = false;
 
   async initialize() {
     if (this.initialized) return;
-
-    await Parser.init();
-    this.parser = new Parser();
     
-    // For now, we'll use the basic parsing without loading WASM files
-    // In production, you'd download these from tree-sitter releases
+    this.parser = new Parser();
+    // For now, we'll use regex-based parsing
+    // Language parsers will be loaded dynamically when needed
     this.initialized = true;
   }
 
