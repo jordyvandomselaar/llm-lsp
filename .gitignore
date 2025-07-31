@@ -1,0 +1,7 @@
+**/node_modules
+**/.history
+**/.turbo
+**/.claude
+**/.cursor
+**/.vscode
+**/out

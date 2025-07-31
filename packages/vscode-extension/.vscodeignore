@@ -1,0 +1,8 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+tsconfig.json
+.vscodeignore
+node_modules/**
+bun.lockb

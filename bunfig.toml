@@ -1,0 +1,3 @@
+[install]
+# Disable hoisting - keep all dependencies isolated in their respective node_modules
+linker = "isolated"

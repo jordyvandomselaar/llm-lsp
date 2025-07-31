@@ -1,0 +1,53 @@
+{
+  "name": "llm-lsp-vscode",
+  "displayName": "LLM LSP",
+  "description": "Language Server Protocol client for LLM",
+  "version": "0.0.1",
+  "publisher": "llm-lsp",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascriptreact"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "LLM LSP",
+      "properties": {
+        "llmLsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable LLM LSP"
+        },
+        "llmLsp.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "bun build ./src/extension.ts --outdir ./out --external vscode --target node --format cjs",
+    "clean": "rm -rf out",
+    "watch": "bun build ./src/extension.ts --outdir ./out --external vscode --watch",
+    "vscode:prepublish": "bun run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/vscode": "^1.75.0",
+    "@vscode/test-electron": "^2.3.0",
+    "typescript": "^5.0.0"
+  }
+}
