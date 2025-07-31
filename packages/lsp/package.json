@@ -1,7 +1,6 @@
 {
   "name": "@llm-lsp/server",
   "module": "src/index.ts",
-  "type": "module",
   "private": true,
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target node --format cjs",

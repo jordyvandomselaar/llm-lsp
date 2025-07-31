@@ -11,6 +11,7 @@ import {
   const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
   
   connection.onInitialize(() => {
+    connection.console.log('LSP Server: Initialized');
     const result: InitializeResult = {
       capabilities: {
         textDocumentSync: TextDocumentSyncKind.Incremental,
@@ -24,8 +25,13 @@ import {
   
     return result;
   });
+  
+  connection.onInitialized(() => {
+    connection.console.log('LSP Server: Connection initialized');
+  });
 
   connection.onCompletion(() => {
+    connection.console.log('LSP Server: Completion requested');
     return [
       {
         label: "Cannot set properties of undefined (setting 'minItems')",
