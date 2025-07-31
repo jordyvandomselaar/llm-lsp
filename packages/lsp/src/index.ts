@@ -3,15 +3,7 @@ import {
   type InitializeResult,
   TextDocumentSyncKind,
   TextDocuments,
-  type InlayHint,
-  InlayHintKind,
-  type InlayHintParams,
   ProposedFeatures,
-  type CodeAction,
-  type CodeActionParams,
-  CodeActionKind,
-  type ExecuteCommandParams,
-  type WorkspaceEdit,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import fetch from "node-fetch";
@@ -41,16 +33,6 @@ connection.onInitialize(async () => {
   const result: InitializeResult = {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
-      // Tell the client that the server supports inlay hints
-      inlayHintProvider: {
-        resolveProvider: false,
-      },
-      // Support code actions
-      codeActionProvider: true,
-      // Support execute command
-      executeCommandProvider: {
-        commands: ['llm-lsp.acceptSuggestionInternal']
-      },
     },
   };
 
@@ -76,7 +58,7 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
         'X-Title': 'LLM LSP',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-3.5-turbo',
+        model: 'google/gemini-2.5-flash',
         messages: [
           {
             role: 'system',
@@ -108,71 +90,59 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
   }
 }
 
-// Store inlay hints by document URI
-const inlayHintsCache = new Map<string, InlayHint[]>();
+// Cache for recent completions to avoid duplicate API calls
+const completionCache = new Map<string, { text: string; timestamp: number }>();
+const CACHE_DURATION = 2000; // 2 seconds
 
-// Store suggestions by document URI and line number
-const suggestionsCache = new Map<string, Map<number, string>>();
-
-// Register inlay hint provider
-connection.languages.inlayHint.on(async (params: InlayHintParams): Promise<InlayHint[]> => {
-  connection.console.log('LSP Server: Inlay hints requested for ' + params.textDocument.uri);
+// Handle inline completion requests
+connection.onRequest('textDocument/inlineCompletion', async (params: { textDocument: { uri: string }, position: { line: number, character: number } }) => {
+  connection.console.log('LSP Server: Inline completion requested for ' + params.textDocument.uri);
   
   const document = documents.get(params.textDocument.uri);
   if (!document) {
     connection.console.log('LSP Server: Document not found');
-    return [];
+    return { text: '' };
+  }
+  
+  // Check cache first
+  const cacheKey = `${params.textDocument.uri}:${params.position.line}:${params.position.character}`;
+  const cached = completionCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return { text: cached.text };
   }
   
   // Parse the document to find incomplete lines
   const parseResult = await parser.parse(document);
-  const hints: InlayHint[] = [];
   
-  // Process each incomplete line
-  for (const incompleteLine of parseResult.incompleteSuggestions) {
-    const prompt = generatePromptForIncompleteLine(incompleteLine, document);
-    
-    connection.console.log(`LSP Server: Fetching suggestion for line ${incompleteLine.line} (${incompleteLine.type})`);
-    
-    const suggestion = await fetchOpenRouterCompletion(prompt);
-    
-    if (suggestion && !suggestion.startsWith('Error:')) {
-      // Store the suggestion for code actions
-      if (!suggestionsCache.has(params.textDocument.uri)) {
-        suggestionsCache.set(params.textDocument.uri, new Map());
-      }
-      suggestionsCache.get(params.textDocument.uri)!.set(incompleteLine.line, suggestion);
-      
-      // Get the actual line text to find the correct end position
-      const lineText = document.getText({
-        start: { line: incompleteLine.line, character: 0 },
-        end: { line: incompleteLine.line + 1, character: 0 }
-      }).trimEnd();
-      
-      // Place the inlay hint at the end of the line
-      const position = {
-        line: incompleteLine.line,
-        character: lineText.length
-      };
-      
-      const hint: InlayHint = {
-        position: position,
-        label: ` → ${suggestion}`,
-        kind: InlayHintKind.Type,
-        paddingLeft: true,
-      };
-      
-      hints.push(hint);
-      connection.console.log(`LSP Server: Added hint at line ${incompleteLine.line}: ${suggestion}`);
-    }
+  // Find the incomplete line at the cursor position
+  const incompleteLine = parseResult.incompleteSuggestions.find(line => line.line === params.position.line);
+  
+  if (!incompleteLine) {
+    return { text: '' };
   }
   
-  connection.console.log(`LSP Server: Returning ${hints.length} hints`);
+  const prompt = generatePromptForIncompleteLine(incompleteLine, document);
   
-  // Cache the hints
-  inlayHintsCache.set(params.textDocument.uri, hints);
+  connection.console.log(`LSP Server: Fetching suggestion for line ${incompleteLine.line} (${incompleteLine.type})`);
   
-  return hints;
+  const suggestion = await fetchOpenRouterCompletion(prompt);
+  
+  if (suggestion && !suggestion.startsWith('Error:')) {
+    // Cache the result
+    completionCache.set(cacheKey, { text: suggestion, timestamp: Date.now() });
+    
+    // Clean old cache entries
+    for (const [key, value] of completionCache.entries()) {
+      if (Date.now() - value.timestamp > CACHE_DURATION * 2) {
+        completionCache.delete(key);
+      }
+    }
+    
+    connection.console.log(`LSP Server: Returning completion: ${suggestion}`);
+    return { text: suggestion };
+  }
+  
+  return { text: '' };
 });
 
 function generatePromptForIncompleteLine(incompleteLine: IncompleteLine, document: TextDocument): string {
@@ -246,102 +216,15 @@ Complete the following line of code: "${incompleteLine.content.trim()}"`;
   }
 }
 
-// Code action provider
-connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
-  const document = documents.get(params.textDocument.uri);
-  if (!document) {
-    return [];
-  }
-  
-  const actions: CodeAction[] = [];
-  const suggestions = suggestionsCache.get(params.textDocument.uri);
-  
-  if (suggestions) {
-    // Check if the cursor is on a line with a suggestion
-    for (const lineNumber of suggestions.keys()) {
-      if (lineNumber >= params.range.start.line && lineNumber <= params.range.end.line) {
-        const suggestion = suggestions.get(lineNumber)!;
-        
-        const action: CodeAction = {
-          title: `Accept AI suggestion: ${suggestion.substring(0, 50)}...`,
-          kind: CodeActionKind.QuickFix,
-          command: {
-            title: 'Accept Suggestion',
-            command: 'llm-lsp.acceptSuggestionInternal',
-            arguments: [params.textDocument.uri, lineNumber, suggestion]
-          }
-        };
-        
-        actions.push(action);
-      }
-    }
-  }
-  
-  return actions;
-});
 
-// Execute command handler
-connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
-  if (params.command === 'llm-lsp.acceptSuggestionInternal' && params.arguments) {
-    const [uri, lineNumber, suggestion] = params.arguments as [string, number, string];
-    const document = documents.get(uri);
-    
-    if (document) {
-      // Get the current line
-      const line = document.getText({
-        start: { line: lineNumber, character: 0 },
-        end: { line: lineNumber + 1, character: 0 }
-      });
-      
-      // Determine where to insert the suggestion
-      let replaceRange: { start: number, end: number };
-      
-      if (line.includes('#')) {
-        // For # prompts, replace from # to end of line
-        const hashIndex = line.indexOf('#');
-        replaceRange = { start: hashIndex, end: line.trimEnd().length };
-      } else {
-        // For regular lines, append at the end of meaningful content
-        const trimmedLength = line.trimEnd().length;
-        replaceRange = { start: trimmedLength, end: trimmedLength };
-      }
-      
-      const edit: WorkspaceEdit = {
-        changes: {
-          [uri]: [{
-            range: {
-              start: { line: lineNumber, character: replaceRange.start },
-              end: { line: lineNumber, character: replaceRange.end }
-            },
-            newText: line.includes('#') ? suggestion : ' ' + suggestion
-          }]
-        }
-      };
-        
-      await connection.workspace.applyEdit(edit);
-      connection.console.log('LSP Server: Applied suggestion');
-      
-      // Remove the suggestion from cache
-      const suggestions = suggestionsCache.get(uri);
-      if (suggestions) {
-        suggestions.delete(lineNumber);
-      }
-    }
-  }
-});
-
-// Listen for text document changes to refresh inlay hints
+// Listen for text document changes to clear cache
 documents.onDidChangeContent(async (change) => {
-  connection.console.log('LSP Server: Document changed, refreshing inlay hints');
-  // Clear caches for this document
-  inlayHintsCache.delete(change.document.uri);
-  suggestionsCache.delete(change.document.uri);
-  
-  // Request the client to refresh inlay hints
-  try {
-    await connection.languages.inlayHint.refresh();
-  } catch (error) {
-    connection.console.error(`LSP Server: Error refreshing inlay hints: ${error}`);
+  connection.console.log('LSP Server: Document changed, clearing completion cache');
+  // Clear cache entries for this document
+  for (const key of completionCache.keys()) {
+    if (key.startsWith(change.document.uri)) {
+      completionCache.delete(key);
+    }
   }
 });
 

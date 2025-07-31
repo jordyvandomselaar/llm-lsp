@@ -3,7 +3,8 @@ import * as path from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 let client: LanguageClient;
-let lastSuggestionLine: number | undefined;
+let lastCompletionTime = Date.now();
+let completionRequestCounter = 0;
 
 export async function activate(context: vscode.ExtensionContext) {
     // Create output channel immediately
@@ -80,42 +81,6 @@ export async function activate(context: vscode.ExtensionContext) {
         clientOptions
     );
     
-    // Register the accept suggestion command before starting the client
-    const acceptCommand = vscode.commands.registerCommand('llm-lsp.acceptSuggestion', async () => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            return;
-        }
-        
-        const position = editor.selection.active;
-        const line = position.line;
-        
-        // Request code actions at the current position
-        const codeActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
-            'vscode.executeCodeActionProvider',
-            editor.document.uri,
-            new vscode.Range(position, position)
-        );
-        
-        if (codeActions && codeActions.length > 0) {
-            // Find our accept suggestion action
-            const acceptAction = codeActions.find(action => 
-                action.command?.command === 'llm-lsp.acceptSuggestionInternal'
-            );
-            
-            if (acceptAction && acceptAction.command?.arguments) {
-                // Execute the LSP command directly
-                await client.sendRequest('workspace/executeCommand', {
-                    command: acceptAction.command.command,
-                    arguments: acceptAction.command.arguments
-                });
-            }
-        }
-    });
-    
-    // Register the command first
-    context.subscriptions.push(acceptCommand);
-    
     // Start the client. This will also launch the server
     await client.start();
     
@@ -124,28 +89,115 @@ export async function activate(context: vscode.ExtensionContext) {
     
     outputChannel.appendLine('[Activate] Language client started!');
     
-    // Show popup to confirm activation
-    vscode.window.showInformationMessage('LLM LSP Extension activated with language server!');
+    // Show popup to confirm activation  
+    vscode.window.showInformationMessage('LLM LSP Extension activated with inline completions!');
     
-    // Listen for inlay hints to track where suggestions are
-    // This helps us know when Tab should accept a suggestion
-    const languages = [
-        'typescript', 'javascript', 'typescriptreact', 'javascriptreact',
-        'python', 'go', 'rust', 'java', 'cpp', 'c', 'csharp', 
-        'ruby', 'php', 'swift', 'kotlin'
-    ];
+    // Check if inline suggestions are enabled
+    const editorConfig = vscode.workspace.getConfiguration('editor');
+    if (!editorConfig.get('inlineSuggest.enabled')) {
+        vscode.window.showWarningMessage('Inline suggestions are disabled. Enable "editor.inlineSuggest.enabled" in settings to see completions.');
+    }
     
-    const inlayHintsProvider = vscode.languages.registerInlayHintsProvider(
-        languages.map(lang => ({ language: lang })),
+    // Register inline completion provider
+    const inlineCompletionProvider = vscode.languages.registerInlineCompletionItemProvider(
+        { pattern: '**' },
         {
-            provideInlayHints: () => {
-                // We don't provide hints here, just track them from the LSP
+            provideInlineCompletionItems: async (document: vscode.TextDocument, position: vscode.Position, context: vscode.InlineCompletionContext) => {
+                const lineText = document.lineAt(position.line).text;
+                const textBeforeCursor = lineText.substring(0, position.character);
+                
+                outputChannel.appendLine(`[Debug] Inline completion requested at ${position.line}:${position.character}, line text: "${lineText}", before cursor: "${textBeforeCursor}"`);
+                
+                // Skip if we're in the middle of a word (unless it's after #)
+                if (!textBeforeCursor.includes('#') && position.character > 0) {
+                    const charBefore = textBeforeCursor[position.character - 1];
+                    if (/\w/.test(charBefore) && position.character < lineText.length && /\w/.test(lineText[position.character])) {
+                        outputChannel.appendLine(`[Debug] Skipping - in middle of word`);
+                        return [];
+                    }
+                }
+                
+                // Get max completions per second from config (default to 2)
+                const maxCompletionsPerSecond = vscode.workspace.getConfiguration('llmLsp').get('maxCompletionsPerSecond', 2);
+                
+                // Debouncing logic
+                completionRequestCounter += 1;
+                const localCompletionRequestCounter = completionRequestCounter;
+                
+                const timeSinceLastCompletion = Date.now() - lastCompletionTime;
+                const minTimeBetweenCompletions = 1000 / maxCompletionsPerSecond;
+                
+                if (timeSinceLastCompletion < minTimeBetweenCompletions) {
+                    const waitTime = minTimeBetweenCompletions - timeSinceLastCompletion;
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    
+                    // Check if a newer request has come in
+                    if (completionRequestCounter !== localCompletionRequestCounter) {
+                        return [];
+                    }
+                }
+                
+                lastCompletionTime = Date.now();
+                
+                try {
+                    outputChannel.appendLine(`[Debug] Sending request to LSP server...`);
+                    
+                    // Request completion from LSP server
+                    const result = await client.sendRequest('textDocument/inlineCompletion', {
+                        textDocument: { uri: document.uri.toString() },
+                        position: position
+                    }) as any;
+                    
+                    outputChannel.appendLine(`[Debug] LSP response: ${JSON.stringify(result)}`);
+                    
+                    if (result && result.text && result.text.trim()) {
+                        outputChannel.appendLine(`[Debug] Creating inline completion at ${position.line}:${position.character} with text: "${result.text}"`);
+                        
+                        // Get the current line up to cursor
+                        const line = document.lineAt(position.line);
+                        const lineText = line.text.substring(0, position.character);
+                        
+                        // If the line has a # prompt, we should replace from # onwards
+                        let insertText = result.text;
+                        let range = new vscode.Range(position, position);
+                        
+                        if (lineText.includes('#')) {
+                            const hashIndex = lineText.indexOf('#');
+                            range = new vscode.Range(
+                                new vscode.Position(position.line, hashIndex),
+                                position
+                            );
+                            insertText = result.text;
+                        }
+                        
+                        // Create inline completion item
+                        const item = new vscode.InlineCompletionItem(
+                            insertText,
+                            range
+                        );
+                        
+                        outputChannel.appendLine(`[Debug] Returning inline completion item with range ${range.start.line}:${range.start.character} to ${range.end.line}:${range.end.character}`);
+                        return [item];
+                    } else {
+                        outputChannel.appendLine(`[Debug] No text in result or text is empty`);
+                    }
+                } catch (error) {
+                    outputChannel.appendLine(`[Error] Inline completion failed: ${error}`);
+                }
+                
                 return [];
             }
         }
     );
     
-    context.subscriptions.push(inlayHintsProvider);
+    context.subscriptions.push(inlineCompletionProvider);
+    
+    // Register manual trigger command for testing
+    const triggerCommand = vscode.commands.registerCommand('llm-lsp.triggerInlineCompletion', async () => {
+        outputChannel.appendLine('[Command] Manual inline completion trigger');
+        await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+    });
+    context.subscriptions.push(triggerCommand);
     
     return {};
 }

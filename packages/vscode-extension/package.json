@@ -29,15 +29,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "llm-lsp.acceptSuggestion",
-        "title": "Accept LLM Suggestion"
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "llm-lsp.acceptSuggestion",
-        "key": "tab",
-        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !editorTabMovesFocus && !inSnippetMode"
+        "command": "llm-lsp.triggerInlineCompletion",
+        "title": "LLM LSP: Trigger Inline Completion"
       }
     ],
     "configuration": {
@@ -59,6 +52,11 @@
           "type": "string",
           "default": "",
           "description": "OpenRouter API key for AI completions. Get one at https://openrouter.ai/keys"
+        },
+        "llmLsp.maxCompletionsPerSecond": {
+          "type": "number",
+          "default": 2,
+          "description": "Maximum number of completion requests per second (to avoid rate limiting)"
         }
       }
     }
