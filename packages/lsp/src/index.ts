@@ -7,7 +7,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import fetch from "node-fetch";
-import { TreeSitterParser, type IncompleteLine } from "./parser";
+import { TreeSitterParser } from "./parser";
 
 // Create connection with all proposed features
 const connection = createConnection(ProposedFeatures.all);
@@ -107,22 +107,23 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
   const cacheKey = `${params.textDocument.uri}:${params.position.line}:${params.position.character}`;
   const cached = completionCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    connection.console.log('LSP Server: Returning cached completion');
     return { text: cached.text };
   }
   
-  // Parse the document to find incomplete lines
-  const parseResult = await parser.parse(document);
+  // Use Tree-sitter to check if we should provide a completion
+  const parseResult = await parser.parseForCompletion(document, params.position);
   
-  // Find the incomplete line at the cursor position
-  const incompleteLine = parseResult.incompleteSuggestions.find(line => line.line === params.position.line);
-  
-  if (!incompleteLine) {
+  if (!parseResult.shouldSuggest) {
+    connection.console.log('LSP Server: Skipping completion - code appears complete');
     return { text: '' };
   }
   
-  const prompt = generatePromptForIncompleteLine(incompleteLine, document);
+  connection.console.log('LSP Server: Code is incomplete, generating completion');
   
-  connection.console.log(`LSP Server: Fetching suggestion for line ${incompleteLine.line} (${incompleteLine.type})`);
+  // Generate prompt with extended context
+  const prompt = generatePromptForPosition(document, params.position);
+  
   connection.console.log(`LSP Server: Sending ${prompt.length} characters of context to LLM`);
   
   const suggestion = await fetchOpenRouterCompletion(prompt);
@@ -145,12 +146,12 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
   return { text: '' };
 });
 
-function generatePromptForIncompleteLine(incompleteLine: IncompleteLine, document: TextDocument): string {
+function generatePromptForPosition(document: TextDocument, position: { line: number, character: number }): string {
   const languageId = document.languageId;
   
   // Get extended context - 250 lines before and after (total ~500 lines)
   const totalLines = document.lineCount;
-  const currentLine = incompleteLine.line;
+  const currentLine = position.line;
   
   // Calculate range for context
   const startLine = Math.max(0, currentLine - 250);
@@ -173,71 +174,37 @@ function generatePromptForIncompleteLine(incompleteLine: IncompleteLine, documen
   
   const context = lines.join('\n');
   
-  switch (incompleteLine.type) {
-    case 'prompt':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
+  // Get the current line content
+  const currentLineText = lines[relativeCurrentLine] || '';
+  
+  // Check for specific patterns in the current line
+  if (currentLineText.includes('#') && !currentLineText.trim().startsWith('#')) {
+    const hashIndex = currentLineText.indexOf('#');
+    const prompt = currentLineText.substring(hashIndex + 1).trim();
+    return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-The line marked with >>><<< contains a prompt. Provide a code suggestion for: "${incompleteLine.prompt}"`;
-
-    case 'function_declaration':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Complete the function declaration marked with >>><<<. Provide an appropriate implementation.`;
-
-    case 'control_flow':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Complete the control flow statement marked with >>><<<.`;
-
-    case 'assignment':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Complete the assignment marked with >>><<< with an appropriate value.`;
-
-    case 'block_start':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Provide appropriate content for the block starting at the line marked with >>><<<.`;
-
-    case 'empty_body':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Provide appropriate content for the empty class/interface body at the line marked with >>><<<.`;
-
-    case 'todo_comment':
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Implement what the TODO comment marked with >>><<< is asking for.`;
-
-    default:
-      return `Given this ${languageId} code context (current line marked with >>><<<):
-\`\`\`${languageId}
-${context}
-\`\`\`
-
-Complete the line of code marked with >>><<<.`;
+The line marked with >>><<< contains a prompt. Provide a code suggestion for: "${prompt}"`;
   }
+  
+  if (/TODO|FIXME|IMPLEMENT/i.test(currentLineText)) {
+    return `Given this ${languageId} code context (current line marked with >>><<<):
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Implement what the TODO/FIXME comment marked with >>><<< is asking for.`;
+  }
+  
+  // Default prompt for any incomplete code
+  return `Given this ${languageId} code context (current line marked with >>><<<):
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Complete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.`;
 }
 
 

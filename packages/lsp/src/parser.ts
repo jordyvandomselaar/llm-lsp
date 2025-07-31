@@ -14,14 +14,14 @@ const Cpp = require('tree-sitter-cpp');
 
 export interface IncompleteLine {
   line: number;
-  type: 'prompt' | 'function_declaration' | 'control_flow' | 'assignment' | 'block_start' | 'empty_body' | 'todo_comment';
+  type: 'incomplete';
   content: string;
-  prompt?: string;
   context: string;
 }
 
 export interface ParseResult {
-  incompleteSuggestions: IncompleteLine[];
+  shouldSuggest: boolean;
+  incompleteLine?: IncompleteLine;
 }
 
 export class TreeSitterParser {
@@ -49,7 +49,7 @@ export class TreeSitterParser {
     this.initialized = true;
   }
 
-  async parse(document: TextDocument): Promise<ParseResult> {
+  async parseForCompletion(document: TextDocument, position: { line: number, character: number }): Promise<ParseResult> {
     if (!this.initialized) {
       await this.initialize();
     }
@@ -57,10 +57,19 @@ export class TreeSitterParser {
     const text = document.getText();
     const languageId = document.languageId;
     const language = this.languages.get(languageId);
+    const lines = text.split('\n');
     
+    // Default to suggesting if we don't have language support
     if (!language || !this.parser) {
-      // Fallback if language not supported
-      return { incompleteSuggestions: [] };
+      return { 
+        shouldSuggest: true,
+        incompleteLine: {
+          line: position.line,
+          type: 'incomplete',
+          content: lines[position.line] || '',
+          context: this.getContext(lines, position.line)
+        }
+      };
     }
 
     // Set the language
@@ -69,150 +78,180 @@ export class TreeSitterParser {
     // Parse the document
     const tree = this.parser.parse(text);
     
-    // Find incomplete patterns using Tree-sitter
-    const incompleteSuggestions = this.findIncompletePatterns(tree, text, languageId);
+    // Check if we should skip completion at this position
+    if (this.shouldSkipCompletion(tree, text, position, lines)) {
+      return { shouldSuggest: false };
+    }
     
-    return { incompleteSuggestions };
+    // Return that we should suggest
+    return { 
+      shouldSuggest: true,
+      incompleteLine: {
+        line: position.line,
+        type: 'incomplete',
+        content: lines[position.line] || '',
+        context: this.getContext(lines, position.line)
+      }
+    };
   }
 
-  private findIncompletePatterns(tree: Parser.Tree, text: string, languageId: string): IncompleteLine[] {
-    const suggestions: IncompleteLine[] = [];
-    const lines = text.split('\n');
+  private shouldSkipCompletion(tree: Parser.Tree, text: string, position: { line: number, character: number }, lines: string[]): boolean {
+    const line = lines[position.line] || '';
+    const beforeCursor = line.substring(0, position.character);
+    const trimmedBefore = beforeCursor.trim();
     
-    // Walk the syntax tree
-    this.walkTree(tree.rootNode, (node) => {
-      const startLine = node.startPosition.row;
-      const nodeText = text.substring(node.startIndex, node.endIndex);
-      
-      // Check for natural language prompts with #
-      if (nodeText.includes('#') && !nodeText.trim().startsWith('#')) {
-        const hashIndex = nodeText.indexOf('#');
-        const afterHash = nodeText.substring(hashIndex + 1).trim();
-        if (afterHash.length > 0) {
-          suggestions.push({
-            line: startLine,
-            type: 'prompt',
-            content: lines[startLine],
-            prompt: afterHash,
-            context: this.getContext(lines, startLine)
-          });
-        }
+    // Skip if line is empty or only whitespace (unless it's inside a function body)
+    if (trimmedBefore === '') {
+      // Check if we're inside an empty function body
+      const nodeAtPosition = this.getNodeAtPosition(tree.rootNode, position);
+      if (nodeAtPosition && this.isInsideEmptyFunctionBody(nodeAtPosition, text)) {
+        return false; // Don't skip - we want completions here
       }
-      
-      // Check for TODO/FIXME comments
-      if (node.type === 'comment' && /TODO|FIXME|IMPLEMENT/i.test(nodeText)) {
-        suggestions.push({
-          line: startLine,
-          type: 'todo_comment',
-          content: lines[startLine],
-          context: this.getContext(lines, startLine)
-        });
-      }
-      
-      // Check for empty function bodies
-      if (this.isFunctionNode(node, languageId)) {
-        const body = this.getFunctionBody(node, languageId);
-        if (body && this.isEmptyBody(body, text)) {
-          // Find the line inside the empty body
-          const bodyStartLine = body.startPosition.row;
-          const bodyEndLine = body.endPosition.row;
-          
-          // If there's an empty line between braces, use that
-          for (let line = bodyStartLine; line <= bodyEndLine; line++) {
-            if (lines[line]?.trim() === '') {
-              suggestions.push({
-                line: line,
-                type: 'empty_body',
-                content: lines[line],
-                context: this.getContext(lines, line)
-              });
-              break;
-            }
-          }
-        }
-      }
-      
-      // Check for incomplete control flow
-      if (this.isControlFlowNode(node, languageId)) {
-        const hasBody = this.hasControlFlowBody(node, languageId);
-        if (!hasBody) {
-          suggestions.push({
-            line: startLine,
-            type: 'control_flow',
-            content: lines[startLine],
-            context: this.getContext(lines, startLine)
-          });
-        }
-      }
-      
-      // Check for assignments without values
-      if (this.isIncompleteAssignment(node, languageId, text)) {
-        suggestions.push({
-          line: startLine,
-          type: 'assignment',
-          content: lines[startLine],
-          context: this.getContext(lines, startLine)
-        });
-      }
-    });
+      return true; // Skip empty lines outside function bodies
+    }
     
-    return suggestions;
-  }
-  
-  private walkTree(node: Parser.SyntaxNode, callback: (node: Parser.SyntaxNode) => void) {
-    callback(node);
-    for (const child of node.children) {
-      this.walkTree(child, callback);
+    // Skip if we're in the middle of typing a word (unless after #)
+    if (!beforeCursor.includes('#') && position.character > 0) {
+      const charBefore = beforeCursor[position.character - 1];
+      const charAfter = line[position.character] || '';
+      if (/\w/.test(charBefore) && /\w/.test(charAfter)) {
+        return true; // Skip - in middle of word
+      }
     }
-  }
-  
-  private isFunctionNode(node: Parser.SyntaxNode, languageId: string): boolean {
-    switch (languageId) {
-      case 'javascript':
-      case 'javascriptreact':
-      case 'typescript':
-      case 'typescriptreact':
-        return node.type === 'function_declaration' || 
-               node.type === 'method_definition' ||
-               node.type === 'arrow_function' ||
-               node.type === 'function_expression';
-      case 'python':
-        return node.type === 'function_definition';
-      case 'go':
-        return node.type === 'function_declaration' || node.type === 'method_declaration';
-      case 'rust':
-        return node.type === 'function_item';
-      case 'java':
-        return node.type === 'method_declaration';
-      case 'c':
-      case 'cpp':
-        return node.type === 'function_definition';
-      default:
-        return false;
+    
+    // Skip if the line appears to be complete code
+    const nodeAtLine = this.getNodeAtLine(tree.rootNode, position.line);
+    if (nodeAtLine && this.isCompleteStatement(nodeAtLine, text, position)) {
+      return true;
     }
+    
+    // Skip if we're inside a string or comment (unless it's a TODO comment)
+    const nodeAtPosition = this.getNodeAtPosition(tree.rootNode, position);
+    if (nodeAtPosition) {
+      if (nodeAtPosition.type === 'string' || nodeAtPosition.type === 'string_literal') {
+        return true;
+      }
+      if (nodeAtPosition.type === 'comment' && !/TODO|FIXME|IMPLEMENT/i.test(line)) {
+        return true;
+      }
+    }
+    
+    // Don't skip - we should provide a completion
+    return false;
   }
   
-  private getFunctionBody(node: Parser.SyntaxNode, languageId: string): Parser.SyntaxNode | null {
-    switch (languageId) {
-      case 'javascript':
-      case 'javascriptreact':
-      case 'typescript':
-      case 'typescriptreact':
-        return node.childForFieldName('body') || node.children.find(c => c.type === 'statement_block') || null;
-      case 'python':
-        return node.childForFieldName('body') || node.children.find(c => c.type === 'block') || null;
-      case 'go':
-        return node.childForFieldName('body') || node.children.find(c => c.type === 'block') || null;
-      case 'rust':
-        return node.childForFieldName('body') || node.children.find(c => c.type === 'block') || null;
-      case 'java':
-        return node.childForFieldName('body') || node.children.find(c => c.type === 'block') || null;
-      case 'c':
-      case 'cpp':
-        return node.childForFieldName('body') || node.children.find(c => c.type === 'compound_statement') || null;
-      default:
+  private getNodeAtPosition(node: Parser.SyntaxNode, position: { line: number, character: number }): Parser.SyntaxNode | null {
+    if (node.startPosition.row <= position.line && 
+        node.endPosition.row >= position.line) {
+      
+      // Check children first for more specific match
+      for (const child of node.children) {
+        const childMatch = this.getNodeAtPosition(child, position);
+        if (childMatch) return childMatch;
+      }
+      
+      // Check if position is within this node's character range
+      if (node.startPosition.row === position.line && node.startPosition.column > position.character) {
         return null;
+      }
+      if (node.endPosition.row === position.line && node.endPosition.column < position.character) {
+        return null;
+      }
+      
+      return node;
     }
+    return null;
+  }
+  
+  private getNodeAtLine(node: Parser.SyntaxNode, line: number): Parser.SyntaxNode | null {
+    if (node.startPosition.row === line) {
+      return node;
+    }
+    
+    for (const child of node.children) {
+      const match = this.getNodeAtLine(child, line);
+      if (match) return match;
+    }
+    
+    return null;
+  }
+  
+  private isCompleteStatement(node: Parser.SyntaxNode, text: string, position: { line: number, character: number }): boolean {
+    // Check if this is a complete statement that doesn't need completion
+    const completeTypes = [
+      'expression_statement',
+      'return_statement',
+      'throw_statement',
+      'break_statement',
+      'continue_statement',
+      'debugger_statement',
+    ];
+    
+    if (completeTypes.includes(node.type)) {
+      // Check if cursor is at the end of the statement
+      const nodeText = text.substring(node.startIndex, node.endIndex);
+      const trimmedText = nodeText.trim();
+      
+      // If it ends with semicolon or the cursor is past the meaningful content, it's complete
+      if (trimmedText.endsWith(';') || position.character >= trimmedText.length) {
+        return true;
+      }
+    }
+    
+    // Check for complete function declarations with bodies
+    if (this.isFunctionNode(node) && this.hasFunctionBody(node, text)) {
+      return true;
+    }
+    
+    // Check for complete variable declarations
+    if ((node.type === 'variable_declaration' || node.type === 'lexical_declaration') && 
+        !text.substring(node.startIndex, node.endIndex).trim().endsWith('=')) {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  private isInsideEmptyFunctionBody(node: Parser.SyntaxNode, text: string): boolean {
+    // Walk up the tree to find a function
+    let current: Parser.SyntaxNode | null = node;
+    while (current) {
+      if (this.isFunctionNode(current)) {
+        const body = this.getFunctionBody(current);
+        if (body && this.isEmptyBody(body, text)) {
+          return true;
+        }
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+  
+  private isFunctionNode(node: Parser.SyntaxNode): boolean {
+    const functionTypes = [
+      'function_declaration',
+      'function_expression',
+      'arrow_function',
+      'method_definition',
+      'function_definition',
+      'function_item',
+      'method_declaration',
+    ];
+    return functionTypes.includes(node.type);
+  }
+  
+  private getFunctionBody(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+    return node.childForFieldName('body') || 
+           node.children.find(c => 
+             c.type === 'statement_block' || 
+             c.type === 'block' || 
+             c.type === 'compound_statement'
+           ) || null;
+  }
+  
+  private hasFunctionBody(node: Parser.SyntaxNode, text: string): boolean {
+    const body = this.getFunctionBody(node);
+    return body !== null && !this.isEmptyBody(body, text);
   }
   
   private isEmptyBody(bodyNode: Parser.SyntaxNode, text: string): boolean {
@@ -233,49 +272,14 @@ export class TreeSitterParser {
       child.type !== '{' && 
       child.type !== '}' && 
       child.type !== 'comment' &&
-      !child.isNamed
+      child.isNamed
     );
     
     return meaningfulChildren.length === 0;
   }
-  
-  private isControlFlowNode(node: Parser.SyntaxNode, _languageId: string): boolean {
-    const controlFlowTypes = [
-      'if_statement',
-      'for_statement',
-      'while_statement',
-      'do_statement',
-      'switch_statement',
-      'for_in_statement',
-      'for_of_statement',
-      'try_statement',
-    ];
-    
-    return controlFlowTypes.includes(node.type);
-  }
-  
-  private hasControlFlowBody(node: Parser.SyntaxNode, _languageId: string): boolean {
-    // Check if the control flow has a proper body
-    const body = node.childForFieldName('body') || 
-                 node.childForFieldName('consequence') ||
-                 node.children.find(c => c.type === 'statement_block' || c.type === 'block');
-    
-    return body !== null && body !== undefined;
-  }
-  
-  private isIncompleteAssignment(node: Parser.SyntaxNode, _languageId: string, text: string): boolean {
-    if (node.type === 'variable_declarator' || node.type === 'assignment_expression') {
-      const nodeText = text.substring(node.startIndex, node.endIndex);
-      // Check if it ends with = but has no value
-      return /=\s*$/.test(nodeText.trim());
-    }
-    return false;
-  }
 
-  private getContext(lines: string[], lineIndex: number): string {
-    // Get 10 lines before and after for context
-    const start = Math.max(0, lineIndex - 10);
-    const end = Math.min(lines.length - 1, lineIndex + 10);
-    return lines.slice(start, end + 1).join('\n');
+  private getContext(_lines: string[], _lineIndex: number): string {
+    // Return empty context - the main module will handle getting extended context
+    return '';
   }
 }
