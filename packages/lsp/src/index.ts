@@ -160,6 +160,7 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
   
   if (!parseResult.shouldSuggest) {
     connection.console.log('LSP Server: Skipping completion - code appears complete');
+    connection.console.log(`LSP Server: Position ${params.position.line}:${params.position.character}`);
     return { text: '' };
   }
   

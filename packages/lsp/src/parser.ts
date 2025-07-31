@@ -102,10 +102,25 @@ export class TreeSitterParser {
     
     // Skip if line is empty or only whitespace (unless it's inside a function body)
     if (trimmedBefore === '') {
-      // Check if we're inside an empty function body
+      // Check if we're inside a function body
       const nodeAtPosition = this.getNodeAtPosition(tree.rootNode, position);
-      if (nodeAtPosition && this.isInsideEmptyFunctionBody(nodeAtPosition, text)) {
-        return false; // Don't skip - we want completions here
+      if (nodeAtPosition) {
+        // Walk up to find if we're inside a function
+        let current: Parser.SyntaxNode | null = nodeAtPosition;
+        while (current) {
+          if (this.isFunctionNode(current)) {
+            // We're inside a function, allow completion
+            return false;
+          }
+          // Also check if we're inside a statement_block that belongs to a function
+          if (current.type === 'statement_block' || current.type === 'block') {
+            // Check if parent is a function
+            if (current.parent && this.isFunctionNode(current.parent)) {
+              return false;
+            }
+          }
+          current = current.parent;
+        }
       }
       return true; // Skip empty lines outside function bodies
     }
@@ -158,6 +173,7 @@ export class TreeSitterParser {
         return null;
       }
       
+      // If we're here, we're within this node
       return node;
     }
     return null;
@@ -212,20 +228,6 @@ export class TreeSitterParser {
     return false;
   }
   
-  private isInsideEmptyFunctionBody(node: Parser.SyntaxNode, text: string): boolean {
-    // Walk up the tree to find a function
-    let current: Parser.SyntaxNode | null = node;
-    while (current) {
-      if (this.isFunctionNode(current)) {
-        const body = this.getFunctionBody(current);
-        if (body && this.isEmptyBody(body, text)) {
-          return true;
-        }
-      }
-      current = current.parent;
-    }
-    return false;
-  }
   
   private isFunctionNode(node: Parser.SyntaxNode): boolean {
     const functionTypes = [
