@@ -4,4 +4,5 @@
 **/.claude
 **/.cursor
 **/.vscode
+**/.env
 **/out

@@ -30,6 +30,11 @@
           "enum": ["off", "messages", "verbose"],
           "default": "off",
           "description": "Traces the communication between VS Code and the language server."
+        },
+        "llmLsp.openRouterApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter API key for AI completions. Get one at https://openrouter.ai/keys"
         }
       }
     }

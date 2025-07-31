@@ -20,11 +20,26 @@ export function activate(context: vscode.ExtensionContext) {
     
     // Server options
     const serverOptions: ServerOptions = {
-        run: { module: serverModule, transport: TransportKind.ipc },
+        run: { 
+            module: serverModule, 
+            transport: TransportKind.ipc,
+            options: {
+                env: {
+                    ...process.env,
+                    OPENROUTER_API_KEY: vscode.workspace.getConfiguration('llmLsp').get('openRouterApiKey') || process.env.OPENROUTER_API_KEY
+                }
+            }
+        },
         debug: {
             module: serverModule,
             transport: TransportKind.ipc,
-            options: debugOptions
+            options: {
+                ...debugOptions,
+                env: {
+                    ...process.env,
+                    OPENROUTER_API_KEY: vscode.workspace.getConfiguration('llmLsp').get('openRouterApiKey') || process.env.OPENROUTER_API_KEY
+                }
+            }
         }
     };
     

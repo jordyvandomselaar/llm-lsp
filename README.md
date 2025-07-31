@@ -9,35 +9,43 @@ A Language Server Protocol implementation for integrating Large Language Model c
    bun install
    ```
 
-2. Build both packages:
+2. Set up your OpenRouter API key:
+   - Get an API key from [OpenRouter](https://openrouter.ai/keys)
+   - Either:
+     - Set it as an environment variable: `export OPENROUTER_API_KEY=your_key_here`
+     - Or configure it in VS Code settings after installing the extension
+
+3. Build both packages:
    ```bash
-   # Build LSP server
-   cd packages/lsp
-   bun run build
-   
-   # Build VS Code extension
-   cd ../vscode-extension
    bun run build
    ```
 
-3. Open VS Code in the extension directory:
+4. Open VS Code in the extension directory:
    ```bash
    code packages/vscode-extension
    ```
 
-4. Press F5 to launch a new VS Code window with the extension loaded.
+5. Press F5 to launch a new VS Code window with the extension loaded.
 
-5. Open a TypeScript/JavaScript file and type `#` to trigger the completion suggestions.
+6. Open a TypeScript/JavaScript file and type `#` to trigger AI-powered completions.
 
 ## Features
 
 - Triggers on `#` character in TypeScript, JavaScript, TypeScript React, and JavaScript React files
-- Currently provides placeholder completions (GitHub issues/PRs)
+- Fetches intelligent code completions from OpenRouter AI
+- Configurable API key through VS Code settings or environment variables
 - Full LSP server-client communication via IPC
+
+## Configuration
+
+In VS Code settings (Cmd/Ctrl + ,), search for "LLM LSP" to find:
+- `llmLsp.enable`: Enable/disable the extension
+- `llmLsp.openRouterApiKey`: Your OpenRouter API key
+- `llmLsp.trace.server`: Debug tracing level
 
 ## Architecture
 
-- **packages/lsp**: The Language Server implementation
+- **packages/lsp**: The Language Server implementation with OpenRouter integration
 - **packages/vscode-extension**: VS Code client extension
 - Uses Bun for building and package management
 - Turbo for monorepo orchestration
