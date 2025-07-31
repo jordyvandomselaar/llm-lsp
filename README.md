@@ -30,10 +30,9 @@ A Language Server Protocol implementation for integrating Large Language Model c
 6. Open a TypeScript/JavaScript file and type `#` followed by a prompt (e.g., `# calculate fibonacci`) to see AI-powered suggestions as inlay hints.
 
 7. To accept a suggestion:
-   - Place your cursor on the line with the hint
-   - Press `Cmd/Ctrl + .` to open the Quick Fix menu
-   - Select "Accept AI suggestion"
-   - Or press `Tab` when on the line (custom keybinding)
+   - Simply press `Tab` when your cursor is on a line with a suggestion
+   - The `#prompt` will be replaced with the AI-generated code
+   - Works just like GitHub Copilot!
 
 ## Features
 

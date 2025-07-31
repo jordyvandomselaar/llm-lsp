@@ -16,11 +16,17 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "llm-lsp.acceptSuggestion",
+        "title": "Accept LLM Suggestion"
+      }
+    ],
     "keybindings": [
       {
-        "command": "editor.action.quickFix",
+        "command": "llm-lsp.acceptSuggestion",
         "key": "tab",
-        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !editorTabMovesFocus"
+        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !editorTabMovesFocus && !inSnippetMode"
       }
     ],
     "configuration": {
@@ -42,12 +48,6 @@
           "type": "string",
           "default": "",
           "description": "OpenRouter API key for AI completions. Get one at https://openrouter.ai/keys"
-        },
-        "editor.inlayHints.enabled": {
-          "type": "string",
-          "enum": ["on", "off", "onUnlessPressed", "offUnlessPressed"],
-          "default": "on",
-          "description": "Enable/disable inlay hints in the editor"
         }
       }
     }

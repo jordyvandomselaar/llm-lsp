@@ -42,7 +42,7 @@ connection.onInitialize(() => {
       codeActionProvider: true,
       // Support execute command
       executeCommandProvider: {
-        commands: ['llm-lsp.acceptSuggestion']
+        commands: ['llm-lsp.acceptSuggestionInternal']
       },
     },
   };
@@ -204,7 +204,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           kind: CodeActionKind.QuickFix,
           command: {
             title: 'Accept Suggestion',
-            command: 'llm-lsp.acceptSuggestion',
+            command: 'llm-lsp.acceptSuggestionInternal',
             arguments: [params.textDocument.uri, lineNumber, suggestion]
           }
         };
@@ -219,7 +219,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
 
 // Execute command handler
 connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
-  if (params.command === 'llm-lsp.acceptSuggestion' && params.arguments) {
+  if (params.command === 'llm-lsp.acceptSuggestionInternal' && params.arguments) {
     const [uri, lineNumber, suggestion] = params.arguments as [string, number, string];
     const document = documents.get(uri);
     

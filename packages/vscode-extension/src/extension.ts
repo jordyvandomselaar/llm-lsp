@@ -3,8 +3,9 @@ import * as path from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 let client: LanguageClient;
+let lastSuggestionLine: number | undefined;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
     // Create output channel immediately
     const outputChannel = vscode.window.createOutputChannel('LLM LSP');
     outputChannel.appendLine('[Activate] LLM LSP Extension is starting...');
@@ -68,23 +69,72 @@ export function activate(context: vscode.ExtensionContext) {
         clientOptions
     );
     
-    // Start the client. This will also launch the server
-    const disposable = client.start();
+    // Register the accept suggestion command before starting the client
+    const acceptCommand = vscode.commands.registerCommand('llm-lsp.acceptSuggestion', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return;
+        }
+        
+        const position = editor.selection.active;
+        const line = position.line;
+        
+        // Request code actions at the current position
+        const codeActions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+            'vscode.executeCodeActionProvider',
+            editor.document.uri,
+            new vscode.Range(position, position)
+        );
+        
+        if (codeActions && codeActions.length > 0) {
+            // Find our accept suggestion action
+            const acceptAction = codeActions.find(action => 
+                action.command?.command === 'llm-lsp.acceptSuggestionInternal'
+            );
+            
+            if (acceptAction && acceptAction.command?.arguments) {
+                // Execute the LSP command directly
+                await client.sendRequest('workspace/executeCommand', {
+                    command: acceptAction.command.command,
+                    arguments: acceptAction.command.arguments
+                });
+            }
+        }
+    });
     
-    // Push the disposable to the context's subscriptions
-    context.subscriptions.push(disposable);
+    // Register the command first
+    context.subscriptions.push(acceptCommand);
+    
+    // Start the client. This will also launch the server
+    await client.start();
+    
+    // Push the client to subscriptions
+    context.subscriptions.push(client);
     
     outputChannel.appendLine('[Activate] Language client started!');
     
     // Show popup to confirm activation
     vscode.window.showInformationMessage('LLM LSP Extension activated with language server!');
     
+    // Listen for inlay hints to track where suggestions are
+    // This helps us know when Tab should accept a suggestion
+    const inlayHintsProvider = vscode.languages.registerInlayHintsProvider(
+        [{ language: 'typescript' }, { language: 'javascript' }, { language: 'typescriptreact' }, { language: 'javascriptreact' }],
+        {
+            provideInlayHints: () => {
+                // We don't provide hints here, just track them from the LSP
+                return [];
+            }
+        }
+    );
+    
+    context.subscriptions.push(inlayHintsProvider);
+    
     return {};
 }
 
-export function deactivate(): Thenable<void> | undefined {
-    if (!client) {
-        return undefined;
+export async function deactivate(): Promise<void> {
+    if (client) {
+        await client.stop();
     }
-    return client.stop();
 }
