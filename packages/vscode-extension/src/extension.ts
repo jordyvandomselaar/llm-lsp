@@ -157,17 +157,26 @@ export async function activate(context: vscode.ExtensionContext) {
                         const line = document.lineAt(position.line);
                         const lineText = line.text.substring(0, position.character);
                         
-                        // If the line has a # prompt, we should replace from # onwards
+                        // Determine the replacement range
                         let insertText = result.text;
                         let range = new vscode.Range(position, position);
                         
-                        if (lineText.includes('#')) {
+                        // Check if we need to replace text before cursor
+                        if (result.replaceBeforeCursor) {
+                            // The server indicates we should replace some text before the cursor
+                            const replaceLength = result.replaceBeforeCursor as number;
+                            const startChar = Math.max(0, position.character - replaceLength);
+                            range = new vscode.Range(
+                                new vscode.Position(position.line, startChar),
+                                position
+                            );
+                        } else if (lineText.includes('#')) {
+                            // Special handling for # prompts
                             const hashIndex = lineText.indexOf('#');
                             range = new vscode.Range(
                                 new vscode.Position(position.line, hashIndex),
                                 position
                             );
-                            insertText = result.text;
                         }
                         
                         // Create inline completion item

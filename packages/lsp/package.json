@@ -17,6 +17,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "diff": "^8.0.2",
     "node-fetch": "2",
     "tree-sitter": "^0.25.0",
     "tree-sitter-c": "^0.24.1",

@@ -174,8 +174,11 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
   const suggestion = await fetchOpenRouterCompletion(prompt);
   
   if (suggestion && !suggestion.startsWith('Error:')) {
+    // Process the suggestion to ensure proper formatting and alignment
+    const processedSuggestion = await processCompletion(suggestion, document, params.position);
+    
     // Cache the result
-    completionCache.set(cacheKey, { text: suggestion, timestamp: Date.now() });
+    completionCache.set(cacheKey, { text: processedSuggestion, timestamp: Date.now() });
     
     // Clean old cache entries
     for (const [key, value] of completionCache.entries()) {
@@ -184,8 +187,8 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
       }
     }
     
-    connection.console.log(`LSP Server: Returning completion: ${suggestion}`);
-    return { text: suggestion };
+    connection.console.log(`LSP Server: Returning completion: ${processedSuggestion}`);
+    return { text: processedSuggestion };
   }
   
   return { text: '' };
@@ -250,6 +253,128 @@ ${context}
 \`\`\`
 
 Complete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.`;
+}
+
+async function processCompletion(suggestion: string, document: TextDocument, position: { line: number, character: number }): Promise<string> {
+  const lines = document.getText().split('\n');
+  const currentLine = lines[position.line] || '';
+  const beforeCursor = currentLine.substring(0, position.character);
+  const afterCursor = currentLine.substring(position.character);
+  
+  // Get context for the formatting LLM
+  const contextStart = Math.max(0, position.line - 10);
+  const contextEnd = Math.min(lines.length, position.line + 10);
+  const contextLines = lines.slice(contextStart, contextEnd);
+  const relativePosition = position.line - contextStart;
+  
+  // Create a merging prompt that matches the few-shot format
+  const mergingPrompt = `Before cursor: "${beforeCursor}"
+After cursor: "${afterCursor}"
+AI completion: "${suggestion}"
+
+What to insert at cursor:`;
+
+  try {
+    const mergedResult = await fetchFormattingCompletion(mergingPrompt);
+    
+    if (mergedResult && !mergedResult.startsWith('Error:')) {
+      connection.console.log('LSP Server: Successfully merged completion');
+      return mergedResult;
+    }
+  } catch (error) {
+    connection.console.error(`LSP Server: Merging failed: ${error}`);
+  }
+  
+  // Fallback - return the original suggestion
+  connection.console.log('LSP Server: Using fallback - returning original suggestion');
+  return suggestion;
+}
+
+async function fetchFormattingCompletion(prompt: string): Promise<string> {
+  if (!OPENROUTER_API_KEY) {
+    return "Error: No API key";
+  }
+  
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/llm-lsp',
+        'X-Title': 'LLM LSP Formatter',
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-3.3-70b-instruct', // Fast, reliable model for merging
+        provider: {
+          sort: 'throughput',
+        },
+        messages: [
+          {
+            role: 'system',
+            content: 'You merge AI code completions with existing text by removing overlaps. Output only the text to insert at the cursor position.'
+          },
+          // Few-shot examples
+          {
+            role: 'user',
+            content: 'Before cursor: "function bubble"\nAfter cursor: ""\nAI completion: "function bubbleSort(arr) { return arr; }"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: 'Sort(arr) { return arr; }'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "const fi"\nAfter cursor: ""\nAI completion: "const fibonacci = (n) => { return n <= 1 ? n : fibonacci(n-1) + fibonacci(n-2); }"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: 'bonacci = (n) => { return n <= 1 ? n : fibonacci(n-1) + fibonacci(n-2); }'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "    "\nAfter cursor: ""\nAI completion: "for (let i = 0; i < arr.length; i++) { console.log(arr[i]); }"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: 'for (let i = 0; i < arr.length; i++) { console.log(arr[i]); }'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "if (x > "\nAfter cursor: ") { doSomething(); }"\nAI completion: "if (x > 10) { return true; }"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: '10'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "class "\nAfter cursor: ""\nAI completion: "class Person { constructor(name) { this.name = name; } }"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: 'Person { constructor(name) { this.name = name; } }'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.1, // Low temperature for consistent merging
+        max_tokens: 1000,
+      }),
+    });
+    
+    if (!response.ok) {
+      return `Error: ${response.status}`;
+    }
+    
+    const data = await response.json() as any;
+    return data.choices?.[0]?.message?.content?.trim() || '';
+      
+  } catch (error) {
+    return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+  }
 }
 
 
