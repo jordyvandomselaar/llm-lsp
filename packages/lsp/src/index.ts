@@ -58,14 +58,14 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
         'X-Title': 'LLM LSP',
       },
       body: JSON.stringify({
-        model: 'moonshotai/kimi-k2',
+        model: 'meta-llama/llama-3.3-70b-instruct',
         provider: {
-          sort: 'latency',
+          sort: 'throughput',
         },
         messages: [
           {
             role: 'system',
-            content: 'You are a code completion assistant. The user will provide code context with the current line marked as >>> line <<<. Complete the code at that position. Output only the code that should be inserted, no explanations or markdown. Match the indentation and coding style of the surrounding code.'
+            content: 'You are a code completion assistant. The user will provide code context with the current line marked as >>> line <<<. Complete the code at that position. Output only the NEW code that should be INSERTED at the marked position. Do not modify or repeat existing code. Match the indentation and coding style of the surrounding code.'
           },
           // Few-shot examples to guide the model
           {
@@ -354,6 +354,38 @@ async function fetchFormattingCompletion(prompt: string): Promise<string> {
           {
             role: 'assistant',
             content: 'Person { constructor(name) { this.name = name; } }'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "}\n"\nAfter cursor: ""\nAI completion: "}\nconsole.log(fibonacci(10));"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: 'console.log(fibonacci(10));'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "    return fibonacci(n - 1) + fibonacci(n - 2);\n}\n"\nAfter cursor: ""\nAI completion: "    return this.fibonacci(n - 1) + this.fibonacci(n - 2);\n}\nconsole.log(fibonacci(10));"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: 'console.log(fibonacci(10));'
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "console.log(result);\n"\nAfter cursor: "}\n"\nAI completion: "console.log(result);\n}\n"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: ''
+          },
+          {
+            role: 'user',
+            content: 'Before cursor: "const x = 10;\n"\nAfter cursor: "const y = 20;"\nAI completion: "const x = 10;\nconst y = 20;"\n\nWhat to insert at cursor:'
+          },
+          {
+            role: 'assistant',
+            content: ''
           },
           {
             role: 'user',
