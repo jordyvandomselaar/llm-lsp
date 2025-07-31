@@ -27,12 +27,20 @@ A Language Server Protocol implementation for integrating Large Language Model c
 
 5. Press F5 to launch a new VS Code window with the extension loaded.
 
-6. Open a TypeScript/JavaScript file and type `#` to trigger AI-powered completions.
+6. Open a TypeScript/JavaScript file and type `#` followed by a prompt (e.g., `# calculate fibonacci`) to see AI-powered suggestions as inlay hints.
+
+7. To accept a suggestion:
+   - Place your cursor on the line with the hint
+   - Press `Cmd/Ctrl + .` to open the Quick Fix menu
+   - Select "Accept AI suggestion"
+   - Or press `Tab` when on the line (custom keybinding)
 
 ## Features
 
-- Triggers on `#` character in TypeScript, JavaScript, TypeScript React, and JavaScript React files
-- Fetches intelligent code completions from OpenRouter AI
+- Triggers on `#` character followed by a prompt in TypeScript, JavaScript, TypeScript React, and JavaScript React files
+- Shows AI suggestions as inline hints (inlay hints) next to your prompts
+- Automatically refreshes hints when you edit the document
+- Fetches intelligent code suggestions from OpenRouter AI
 - Configurable API key through VS Code settings or environment variables
 - Full LSP server-client communication via IPC
 

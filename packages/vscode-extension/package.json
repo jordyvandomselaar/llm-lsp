@@ -16,6 +16,13 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "keybindings": [
+      {
+        "command": "editor.action.quickFix",
+        "key": "tab",
+        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !editorTabMovesFocus"
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "LLM LSP",
@@ -35,6 +42,12 @@
           "type": "string",
           "default": "",
           "description": "OpenRouter API key for AI completions. Get one at https://openrouter.ai/keys"
+        },
+        "editor.inlayHints.enabled": {
+          "type": "string",
+          "enum": ["on", "off", "onUnlessPressed", "offUnlessPressed"],
+          "default": "on",
+          "description": "Enable/disable inlay hints in the editor"
         }
       }
     }
