@@ -62,15 +62,14 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
         messages: [
           {
             role: 'system',
-            content: 'You are a code completion assistant. Provide a single, concise code completion or suggestion. Output only the code that should be inserted, no explanations or markdown. Be contextually aware and provide completions that fit naturally with the existing code style.'
+            content: 'You are a code completion assistant. The user will provide code context with the current line marked as >>> line <<<. Analyze the surrounding code to understand the patterns, style, and context. Provide a single, concise code completion or suggestion that fits naturally with the existing codebase. Output only the code that should be inserted, no explanations or markdown. Match the indentation and coding style of the surrounding code.'
           },
           {
             role: 'user',
             content: prompt
           }
         ],
-        temperature: 0.7,
-        max_tokens: 150,
+        temperature: 0.7
       }),
     });
     
@@ -124,6 +123,7 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
   const prompt = generatePromptForIncompleteLine(incompleteLine, document);
   
   connection.console.log(`LSP Server: Fetching suggestion for line ${incompleteLine.line} (${incompleteLine.type})`);
+  connection.console.log(`LSP Server: Sending ${prompt.length} characters of context to LLM`);
   
   const suggestion = await fetchOpenRouterCompletion(prompt);
   
@@ -147,72 +147,96 @@ connection.onRequest('textDocument/inlineCompletion', async (params: { textDocum
 
 function generatePromptForIncompleteLine(incompleteLine: IncompleteLine, document: TextDocument): string {
   const languageId = document.languageId;
-  const context = incompleteLine.context;
+  
+  // Get extended context - 250 lines before and after (total ~500 lines)
+  const totalLines = document.lineCount;
+  const currentLine = incompleteLine.line;
+  
+  // Calculate range for context
+  const startLine = Math.max(0, currentLine - 250);
+  const endLine = Math.min(totalLines - 1, currentLine + 250);
+  
+  // Get the extended context
+  const extendedContext = document.getText({
+    start: { line: startLine, character: 0 },
+    end: { line: endLine + 1, character: 0 }
+  });
+  
+  // Mark the current line in the context
+  const lines = extendedContext.split('\n');
+  const relativeCurrentLine = currentLine - startLine;
+  
+  // Add a marker for the current line
+  if (relativeCurrentLine >= 0 && relativeCurrentLine < lines.length) {
+    lines[relativeCurrentLine] = `>>> ${lines[relativeCurrentLine]} <<<`;
+  }
+  
+  const context = lines.join('\n');
   
   switch (incompleteLine.type) {
     case 'prompt':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Provide a code suggestion for: "${incompleteLine.prompt}"`;
+The line marked with >>><<< contains a prompt. Provide a code suggestion for: "${incompleteLine.prompt}"`;
 
     case 'function_declaration':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Complete this function declaration with an appropriate implementation. Current line: "${incompleteLine.content.trim()}"`;
+Complete the function declaration marked with >>><<<. Provide an appropriate implementation.`;
 
     case 'control_flow':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Complete this control flow statement. Current line: "${incompleteLine.content.trim()}"`;
+Complete the control flow statement marked with >>><<<.`;
 
     case 'assignment':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Complete this assignment with an appropriate value. Current line: "${incompleteLine.content.trim()}"`;
+Complete the assignment marked with >>><<< with an appropriate value.`;
 
     case 'block_start':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Provide the appropriate content for this block. Current line: "${incompleteLine.content.trim()}"`;
+Provide appropriate content for the block starting at the line marked with >>><<<.`;
 
     case 'empty_body':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Provide appropriate content for this empty class/interface body. Current line: "${incompleteLine.content.trim()}"`;
+Provide appropriate content for the empty class/interface body at the line marked with >>><<<.`;
 
     case 'todo_comment':
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Implement what this TODO comment is asking for: "${incompleteLine.content.trim()}"`;
+Implement what the TODO comment marked with >>><<< is asking for.`;
 
     default:
-      return `Given this ${languageId} code context:
+      return `Given this ${languageId} code context (current line marked with >>><<<):
 \`\`\`${languageId}
 ${context}
 \`\`\`
 
-Complete the following line of code: "${incompleteLine.content.trim()}"`;
+Complete the line of code marked with >>><<<.`;
   }
 }
 
