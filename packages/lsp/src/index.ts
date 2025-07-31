@@ -15,6 +15,7 @@ import {
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import fetch from "node-fetch";
+import { TreeSitterParser, type IncompleteLine } from "./parser";
 
 // Create connection with all proposed features
 const connection = createConnection(ProposedFeatures.all);
@@ -24,12 +25,18 @@ const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 // Get API key from environment variable
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-connection.onInitialize(() => {
+// Initialize parser
+const parser = new TreeSitterParser();
+
+connection.onInitialize(async () => {
   connection.console.log('LSP Server: Initialized');
   
   if (!OPENROUTER_API_KEY) {
     connection.console.warn('LSP Server: OPENROUTER_API_KEY not set. Completions will not work.');
   }
+  
+  // Initialize parser
+  await parser.initialize();
   
   const result: InitializeResult = {
     capabilities: {
@@ -65,15 +72,15 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/llm-lsp', // Optional but recommended
-        'X-Title': 'LLM LSP', // Optional
+        'HTTP-Referer': 'https://github.com/llm-lsp',
+        'X-Title': 'LLM LSP',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-3.5-turbo', // Fast model for completions
+        model: 'openai/gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
-            content: 'You are a code completion assistant. Provide a single, concise code completion or suggestion. No explanations, just the code.'
+            content: 'You are a code completion assistant. Provide a single, concise code completion or suggestion. Output only the code that should be inserted, no explanations or markdown. Be contextually aware and provide completions that fit naturally with the existing code style.'
           },
           {
             role: 'user',
@@ -117,61 +124,46 @@ connection.languages.inlayHint.on(async (params: InlayHintParams): Promise<Inlay
     return [];
   }
   
-  const text = document.getText();
+  // Parse the document to find incomplete lines
+  const parseResult = await parser.parse(document);
   const hints: InlayHint[] = [];
   
-  // Find all lines containing # followed by text
-  const lines = text.split('\n');
-  
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-    const line = lines[lineIndex];
-    const hashIndex = line.indexOf('#');
+  // Process each incomplete line
+  for (const incompleteLine of parseResult.incompleteSuggestions) {
+    const prompt = generatePromptForIncompleteLine(incompleteLine, document);
     
-    if (hashIndex !== -1) {
-      // Check if there's text after the #
-      const afterHash = line.substring(hashIndex + 1).trim();
-      if (afterHash.length > 0) {
-        // Get context: previous 500 chars
-        const lineStartOffset = document.offsetAt({ line: lineIndex, character: 0 });
-        const hashOffset = lineStartOffset + hashIndex;
-        const contextStart = Math.max(0, hashOffset - 500);
-        const context = text.substring(contextStart, hashOffset);
-        
-        const prompt = `Given this code context:
-\`\`\`
-${context}
-\`\`\`
-
-Provide a code suggestion for: "${afterHash}"`;
-        
-        connection.console.log(`LSP Server: Fetching suggestion for: "${afterHash}"`);
-        
-        const suggestion = await fetchOpenRouterCompletion(prompt);
-        
-        if (suggestion && !suggestion.startsWith('Error:')) {
-          // Store the suggestion for code actions
-          if (!suggestionsCache.has(params.textDocument.uri)) {
-            suggestionsCache.set(params.textDocument.uri, new Map());
-          }
-          suggestionsCache.get(params.textDocument.uri)!.set(lineIndex, suggestion);
-          
-          // Place the inlay hint at the end of the line
-          const position = {
-            line: lineIndex,
-            character: line.length
-          };
-          
-          const hint: InlayHint = {
-            position: position,
-            label: ` → ${suggestion}`,
-            kind: InlayHintKind.Type,
-            paddingLeft: true,
-          };
-          
-          hints.push(hint);
-          connection.console.log(`LSP Server: Added hint at line ${lineIndex}: ${suggestion}`);
-        }
+    connection.console.log(`LSP Server: Fetching suggestion for line ${incompleteLine.line} (${incompleteLine.type})`);
+    
+    const suggestion = await fetchOpenRouterCompletion(prompt);
+    
+    if (suggestion && !suggestion.startsWith('Error:')) {
+      // Store the suggestion for code actions
+      if (!suggestionsCache.has(params.textDocument.uri)) {
+        suggestionsCache.set(params.textDocument.uri, new Map());
       }
+      suggestionsCache.get(params.textDocument.uri)!.set(incompleteLine.line, suggestion);
+      
+      // Get the actual line text to find the correct end position
+      const lineText = document.getText({
+        start: { line: incompleteLine.line, character: 0 },
+        end: { line: incompleteLine.line + 1, character: 0 }
+      }).trimEnd();
+      
+      // Place the inlay hint at the end of the line
+      const position = {
+        line: incompleteLine.line,
+        character: lineText.length
+      };
+      
+      const hint: InlayHint = {
+        position: position,
+        label: ` → ${suggestion}`,
+        kind: InlayHintKind.Type,
+        paddingLeft: true,
+      };
+      
+      hints.push(hint);
+      connection.console.log(`LSP Server: Added hint at line ${incompleteLine.line}: ${suggestion}`);
     }
   }
   
@@ -182,6 +174,77 @@ Provide a code suggestion for: "${afterHash}"`;
   
   return hints;
 });
+
+function generatePromptForIncompleteLine(incompleteLine: IncompleteLine, document: TextDocument): string {
+  const languageId = document.languageId;
+  const context = incompleteLine.context;
+  
+  switch (incompleteLine.type) {
+    case 'prompt':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Provide a code suggestion for: "${incompleteLine.prompt}"`;
+
+    case 'function_declaration':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Complete this function declaration with an appropriate implementation. Current line: "${incompleteLine.content.trim()}"`;
+
+    case 'control_flow':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Complete this control flow statement. Current line: "${incompleteLine.content.trim()}"`;
+
+    case 'assignment':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Complete this assignment with an appropriate value. Current line: "${incompleteLine.content.trim()}"`;
+
+    case 'block_start':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Provide the appropriate content for this block. Current line: "${incompleteLine.content.trim()}"`;
+
+    case 'empty_body':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Provide appropriate content for this empty class/interface body. Current line: "${incompleteLine.content.trim()}"`;
+
+    case 'todo_comment':
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Implement what this TODO comment is asking for: "${incompleteLine.content.trim()}"`;
+
+    default:
+      return `Given this ${languageId} code context:
+\`\`\`${languageId}
+${context}
+\`\`\`
+
+Complete the following line of code: "${incompleteLine.content.trim()}"`;
+  }
+}
 
 // Code action provider
 connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
@@ -230,29 +293,38 @@ connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
         end: { line: lineNumber + 1, character: 0 }
       });
       
-      // Find the # character to replace from that point
-      const hashIndex = line.indexOf('#');
-      if (hashIndex !== -1) {
-        const edit: WorkspaceEdit = {
-          changes: {
-            [uri]: [{
-              range: {
-                start: { line: lineNumber, character: hashIndex },
-                end: { line: lineNumber, character: line.trimEnd().length }
-              },
-              newText: suggestion
-            }]
-          }
-        };
-        
-        await connection.workspace.applyEdit(edit);
-        connection.console.log('LSP Server: Applied suggestion');
-        
-        // Remove the suggestion from cache
-        const suggestions = suggestionsCache.get(uri);
-        if (suggestions) {
-          suggestions.delete(lineNumber);
+      // Determine where to insert the suggestion
+      let replaceRange: { start: number, end: number };
+      
+      if (line.includes('#')) {
+        // For # prompts, replace from # to end of line
+        const hashIndex = line.indexOf('#');
+        replaceRange = { start: hashIndex, end: line.trimEnd().length };
+      } else {
+        // For regular lines, append at the end of meaningful content
+        const trimmedLength = line.trimEnd().length;
+        replaceRange = { start: trimmedLength, end: trimmedLength };
+      }
+      
+      const edit: WorkspaceEdit = {
+        changes: {
+          [uri]: [{
+            range: {
+              start: { line: lineNumber, character: replaceRange.start },
+              end: { line: lineNumber, character: replaceRange.end }
+            },
+            newText: line.includes('#') ? suggestion : ' ' + suggestion
+          }]
         }
+      };
+        
+      await connection.workspace.applyEdit(edit);
+      connection.console.log('LSP Server: Applied suggestion');
+      
+      // Remove the suggestion from cache
+      const suggestions = suggestionsCache.get(uri);
+      if (suggestions) {
+        suggestions.delete(lineNumber);
       }
     }
   }

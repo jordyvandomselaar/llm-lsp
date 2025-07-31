@@ -36,8 +36,16 @@ A Language Server Protocol implementation for integrating Large Language Model c
 
 ## Features
 
-- Triggers on `#` character followed by a prompt in TypeScript, JavaScript, TypeScript React, and JavaScript React files
-- Shows AI suggestions as inline hints (inlay hints) next to your prompts
+- **Multi-Language Support**: Works with TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, C#, Ruby, PHP, Swift, Kotlin, and more!
+- **Smart Auto-suggestions**: Automatically suggests completions for:
+  - Incomplete function/class declarations
+  - Lines ending with `{`, `(`, or `=`
+  - If/for/while statements without bodies
+  - TODO/FIXME comments
+  - Any line with `#` followed by a natural language prompt
+- **Copilot-like Experience**: Just press Tab to accept suggestions
+- **Language-Aware**: Provides context-specific suggestions based on the programming language
+- Shows AI suggestions as inline hints (inlay hints)
 - Automatically refreshes hints when you edit the document
 - Fetches intelligent code suggestions from OpenRouter AI
 - Configurable API key through VS Code settings or environment variables

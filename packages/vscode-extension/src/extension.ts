@@ -50,13 +50,24 @@ export async function activate(context: vscode.ExtensionContext) {
             { scheme: 'file', language: 'typescript' },
             { scheme: 'file', language: 'javascript' },
             { scheme: 'file', language: 'typescriptreact' },
-            { scheme: 'file', language: 'javascriptreact' }
+            { scheme: 'file', language: 'javascriptreact' },
+            { scheme: 'file', language: 'python' },
+            { scheme: 'file', language: 'go' },
+            { scheme: 'file', language: 'rust' },
+            { scheme: 'file', language: 'java' },
+            { scheme: 'file', language: 'cpp' },
+            { scheme: 'file', language: 'c' },
+            { scheme: 'file', language: 'csharp' },
+            { scheme: 'file', language: 'ruby' },
+            { scheme: 'file', language: 'php' },
+            { scheme: 'file', language: 'swift' },
+            { scheme: 'file', language: 'kotlin' }
         ],
         synchronize: {
             // Automatically sync all workspace settings
             configurationSection: 'llmLsp',
-            // Notify server about file changes to .ts and .js files in workspace
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{ts,js,tsx,jsx}')
+            // Notify server about file changes to supported files in workspace
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{ts,js,tsx,jsx,py,go,rs,java,cpp,c,cs,rb,php,swift,kt}')
         },
         outputChannel: outputChannel
     };
@@ -118,8 +129,14 @@ export async function activate(context: vscode.ExtensionContext) {
     
     // Listen for inlay hints to track where suggestions are
     // This helps us know when Tab should accept a suggestion
+    const languages = [
+        'typescript', 'javascript', 'typescriptreact', 'javascriptreact',
+        'python', 'go', 'rust', 'java', 'cpp', 'c', 'csharp', 
+        'ruby', 'php', 'swift', 'kotlin'
+    ];
+    
     const inlayHintsProvider = vscode.languages.registerInlayHintsProvider(
-        [{ language: 'typescript' }, { language: 'javascript' }, { language: 'typescriptreact' }, { language: 'javascriptreact' }],
+        languages.map(lang => ({ language: lang })),
         {
             provideInlayHints: () => {
                 // We don't provide hints here, just track them from the LSP
