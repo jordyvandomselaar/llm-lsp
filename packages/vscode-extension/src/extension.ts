@@ -102,7 +102,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const inlineCompletionProvider = vscode.languages.registerInlineCompletionItemProvider(
         { pattern: '**' },
         {
-            provideInlineCompletionItems: async (document: vscode.TextDocument, position: vscode.Position, context: vscode.InlineCompletionContext) => {
+            provideInlineCompletionItems: async (document: vscode.TextDocument, position: vscode.Position, _context: vscode.InlineCompletionContext) => {
                 const lineText = document.lineAt(position.line).text;
                 const textBeforeCursor = lineText.substring(0, position.character);
                 

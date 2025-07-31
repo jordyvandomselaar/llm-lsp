@@ -58,11 +58,55 @@ async function fetchOpenRouterCompletion(prompt: string): Promise<string> {
         'X-Title': 'LLM LSP',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'moonshotai/kimi-k2',
+        provider: {
+          sort: 'latency',
+        },
         messages: [
           {
             role: 'system',
-            content: 'You are a code completion assistant. The user will provide code context with the current line marked as >>> line <<<. Analyze the surrounding code to understand the patterns, style, and context. Provide a single, concise code completion or suggestion that fits naturally with the existing codebase. Output only the code that should be inserted, no explanations or markdown. Match the indentation and coding style of the surrounding code.'
+            content: 'You are a code completion assistant. The user will provide code context with the current line marked as >>> line <<<. Complete the code at that position. Output only the code that should be inserted, no explanations or markdown. Match the indentation and coding style of the surrounding code.'
+          },
+          // Few-shot examples to guide the model
+          {
+            role: 'user',
+            content: 'Given this python code context (current line marked with >>><<<):\n```python\ndef greet(name):\n    >>> print(f"Hello, {") <<<\n```\nComplete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.'
+          },
+          {
+            role: 'assistant',
+            content: 'name}")'
+          },
+          {
+            role: 'user',
+            content: 'Given this javascript code context (current line marked with >>><<<):\n```javascript\nfunction sum(a, b) {\n    >>> return a +  <<<\n}\n```\nComplete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.'
+          },
+          {
+            role: 'assistant',
+            content: 'b;'
+          },
+          {
+            role: 'user',
+            content: 'Given this python code context (current line marked with >>><<<):\n```python\n>>> #  <<<\ndef add(a, b):\n    return a + b\n```\nComplete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.'
+          },
+          {
+            role: 'assistant',
+            content: 'Adds two numbers'
+          },
+          {
+            role: 'user',
+            content: 'Given this python code context (current line marked with >>><<<):\n```python\n# This function checks if a number is even\n>>>  <<<\n```\nComplete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.'
+          },
+          {
+            role: 'assistant',
+            content: 'def is_even(n):\n    return n % 2 == 0'
+          },
+          {
+            role: 'user',
+            content: 'Given this javascript code context (current line marked with >>><<<):\n```javascript\nfunction bubbleSort() {\n    >>>      <<<\n}\n```\nComplete the code at the line marked with >>><<<. Provide only the code to insert, matching the existing style and indentation.'
+          },
+          {
+            role: 'assistant',
+            content: '// Implementation of bubble sort algorithm\n    for (let i = 0; i < arr.length - 1; i++) {\n        for (let j = 0; j < arr.length - i - 1; j++) {\n            if (arr[j] > arr[j + 1]) {\n                // Swap elements\n                let temp = arr[j];\n                arr[j] = arr[j + 1];\n                arr[j + 1] = temp;\n            }\n        }\n    }\n    return arr;'
           },
           {
             role: 'user',
